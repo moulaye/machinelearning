@@ -1,0 +1,139 @@
+---
+title: 'Practical Machine Learning: Assignment'
+output:
+  html_document:
+    theme: united
+    toc: yes
+---
+
+The analysis was broken into five phases: Question, Data acquisition, Features selection, Model selection, Model evaluation.
+
+### The question
+
+The first step was to define the question. The goal of this analysis was to determine if it was feasible to predict how well the participants of the experiment perform a certain exercise. The outcome variable was "classe". 
+
+
+### Data selection
+
+The second step of this analysis was to acquire the training set and the test set. The training set had 160 variables and 19,622 observations . Using the Summary function in R, we detected a significant number of calculated variables. We built new data sets that excluded all calculated variables and time stamp infos. The newly created data sets (*train_new* and *test_set*) were used to perform the analysis. The new training set (*train_new*) had 55 variables.
+
+
+```{r loadData, cache=TRUE}
+# link to data sets
+train_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# acquire training and test data sets
+trainingset <- read.csv(file=train_url,header=TRUE,sep=",")
+testset     <- read.csv(file=test_url, header=TRUE, sep=",")
+
+# identify calculated metrics/variables besides [total] and timestamps and user info
+calcul_var <- grep("^kurtosis|max|min|amplitude|var|avg|stddev|skewness|user|raw|cvtd|X",names(trainingset))
+
+# create new data sets, select only non calculated metrics
+train_new  <-  trainingset[,-calcul_var]
+test_new   <-  testset[,-calcul_var]
+
+```
+
+### Features selection
+
+The third step was to select the most important variables that will be included in the model.To perform this step, we used
+the Recursive Feature Elimination (RFE) technique. Only 20% of the training set was selected to run the algorithm. The technique used for cross validation during this step was the k-fold technique. The built-in algorithm used for the feature selection was Random forest.
+The result of the RFE showed that only four variables contributed significantly to the model accuracy: **roll_belt, num_window, magnet_dumbbell_z, yaw_belt** as shown on the graph illustrated in this section.
+
+
+```{r RFEStep, cache=TRUE}
+
+# load key libraries
+library(caret)
+library(mlbench)
+library(parallel)
+library(cluster)
+
+# create a seed to make it reproducible
+set.seed(12345)
+
+# create partition, containing 20% of the training observations, to use for Recursive Feature selection step
+train_index_0 <- createDataPartition(y=train_new$classe,p=0.2,list=FALSE)
+train_feat_select  <- train_new[train_index_0,]
+
+# use random forest algorithm and K-fold as cross validation technique
+rfectrl <- rfeControl(functions=rfFuncs, method="cv", number=10, verbose = FALSE)
+# run algorithm to select relevant features
+profile_rf <- rfe(train_feat_select[,1:54], train_feat_select[,55], sizes=c(1:10), rfeControl=rfectrl)
+
+# list the chosen features
+predictors(profile_rf)
+# plot top features
+plot(profile_rf, type = c("g", "o"))
+
+```
+
+
+
+
+
+
+
+
+### Model selection
+
+The fourth step was to select a model. The training set was divided into two new data sets; 60% of the observations were selected for the training set (*train_m*) and the rest of the observations were allocated to the test set (*test_m*). Two algorithms were used for model selection : Random Forest and Boosting. Only the four variables identified during the feature selection process were used to train the two models (roll_belt, num_window, magnet_dumbbell_z, yaw_belt). The K-fold technique was again used for cross validation. Both models and algorithms, using training data (in sample error), showed a great level of accuracy with approx. 0.99. This level of accuracy might not be reflected if the models were to use new observations to make predictions. The Model Evaluation phase was the necessary step to validate the out of Sample error.
+
+
+```{r ModelStep, cache=TRUE}
+
+# create partition to use for the model selection phase, split training set into 
+# two new data sets (training and test)
+train_index_1 <- createDataPartition(y=train_new$classe,p=0.6,list=FALSE)
+train_m       <- train_new[train_index_1,]
+test_m        <- train_new[-train_index_1,]
+
+# select only important variables based on feature selection results
+train_small <- train_m[,c("roll_belt","num_window","magnet_dumbbell_z","yaw_belt","classe")]
+test_small  <- test_m[,c("roll_belt","num_window","magnet_dumbbell_z","yaw_belt","classe")]
+
+# define cross validation technique
+train_ctrl  <- trainControl(method="cv", number=10)
+
+# train the model with random forest algorithm
+model_rf <- train(classe ~ ., data=train_small, trControl=train_ctrl, preProcess=c("center","scale"), method="rf",prox=TRUE)
+# train the model with the boosting algorithm
+model_gbm <- train(classe ~ ., data=train_small, trControl=train_ctrl, preProcess=c("center","scale"), method="gbm",verbose=FALSE)
+
+```
+
+
+### Model evaluation
+
+The fifth step, which was the most important in terms of validating the performance of the model. We used the model built using
+Random Forest and tested the model against the test set (*test_small*) created during the Model selection phase. We performed some predictions using the test set and analyzed the results using the *confusionMatrix* function in caret. The model showed a high level of accuracy (0.99) with test data (Out of sample error).
+
+```{r EvalStep, cache=TRUE}
+
+# make predictions using random forest algorithm and test data sets
+rf_predictions <- predict(model_rf, test_small[,1:4])
+
+# summarize results for random forest through the use of the confusionMatrix
+confusionMatrix(rf_predictions, test_small$classe)
+
+```
+
+
+### Programming assignment
+
+The model built, it was easy to use it to predict the "classe" variable of the 20 observations (programming assignment).
+
+```{r ProgAssign, eval=FALSE}
+
+# this chunck of code is not evaluated
+# select the most important variables from the original test data
+test_final  <- test_new [,c("roll_belt","num_window","magnet_dumbbell_z","yaw_belt","problem_id")]
+
+# make predictions on the test set, problem_id can only be a number between 1 and 20
+ans <- predict(model_rf,test_final[which(test_final$problem_id == 20),-5])
+# print output
+print(ans)
+
+```
